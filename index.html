@@ -3,15 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Karen Crashout — race-free boot + robust audio</title>
+<title>Karen Crashout — Canvas + Hamburger Menu</title>
 <link rel="preload" as="audio" href="Assets/splash_screen.mp3" type="audio/mpeg" crossorigin="anonymous">
 <style>
   :root { --bg:#1e232d; --panel:#0d1328; --ink:#e6eeff; --muted:#9fb0d8; --btn:#1a2143; --btnH:#232d58; --cy:#69e7c3; }
+
+  /* Canvas-first layout */
   html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
-  body{display:grid;grid-template-columns:340px 1fr;background:var(--bg)}
-  #ui{background:var(--panel);color:var(--ink);padding:14px;overflow:auto;box-shadow:inset -1px 0 0 rgba(255,255,255,.06)}
-  h1{margin:0 0 8px;font-size:20px}
-  small{color:var(--muted)}
+  body{display:block;background:var(--bg)}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block;background:#0e1118;z-index:1}
+
+  /* Hamburger + slide-in menu */
+  #hamb{
+    position:fixed; left:16px; top:16px; z-index:9;
+    width:44px; height:44px; border:0; border-radius:12px; cursor:pointer;
+    background:#0d1328; box-shadow:0 6px 22px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #hamb .bar{width:22px; height:2px; background:#e6eeff; border-radius:2px; margin:3px 0;}
+  #hamb:hover{ background:#182045; }
+
+  #ui{
+    position:fixed; left:0; top:0; bottom:0; width:360px;
+    background:rgba(13,19,40,.98); color:#e6eeff; padding:14px 16px 18px;
+    transform:translateX(-105%); transition:transform .25s ease;
+    box-shadow: 0 16px 60px rgba(0,0,0,.55), inset -1px 0 0 rgba(255,255,255,.06);
+    overflow:auto; z-index:8;
+  }
+  #ui.open{ transform:translateX(0); }
+  #scrim{ position:fixed; inset:0; background:rgba(0,0,0,.42); z-index:7; display:none; }
+  #scrim.show{ display:block; }
+
   .row{margin:10px 0}
   .btn{display:inline-block;background:var(--btn);color:#eaf2ff;padding:8px 12px;border-radius:10px;cursor:pointer;user-select:none;margin:4px 6px 0 0}
   .btn:hover{background:var(--btnH)}
@@ -19,21 +41,28 @@
   .sel{outline:2px solid var(--cy)}
   .slider{width:100%}
   .kv{font-family:ui-monospace,Consolas,Menlo,monospace}
-  canvas{width:100%;height:100%;display:block;background:#0e1118}
 
-  .title{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,9,16,.72);z-index:7}
+  /* Title overlay */
+  .title{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(7,9,16,.72);z-index:10}
   .card{background:#0b1022cc;color:#cfe0ff;width:min(920px,92vw);padding:22px;border-radius:16px;box-shadow:0 12px 50px rgba(0,0,0,.45)}
   .pill{background:#182045;border-radius:999px;padding:6px 10px;margin-right:6px;display:inline-block}
   .title::before{content:"";position:absolute;inset:0;z-index:-1;background:#111 url(Assets/Karen_Crashout_splash.png) center/cover no-repeat;filter:saturate(1.08) brightness(.9);}
 
-  #err{position:fixed;right:12px;bottom:12px;max-width:50ch;background:#2b1d1d;color:#ffd0d0;border:1px solid #ff8080;padding:10px 12px;border-radius:10px;font:12px ui-monospace;z-index:9;display:none;white-space:pre-wrap}
+  /* Error bubble */
+  #err{position:fixed;right:12px;bottom:12px;max-width:50ch;background:#2b1d1d;color:#ffd0d0;border:1px solid #ff8080;padding:10px 12px;border-radius:10px;font:12px ui-monospace;z-index:11;display:none;white-space:pre-wrap}
 </style>
 </head>
 <body>
 
+<!-- HAMBURGER -->
+<button id="hamb" aria-label="Menu">
+  <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+</button>
+
+<!-- SLIDE-IN MENU (IDs preserved so existing logic works) -->
 <div id="ui">
-  <h1>Karen Crashout</h1>
-  <small>Boot-safe • Splash music on first click • Bosses attack • 💩 at 20% • Sprite scaling</small>
+  <h1 style="margin:0 0 8px;font-size:20px">Karen Crashout</h1>
+  <small style="color:#9fb0d8">Open/close with the hamburger. Settings mirror the original panel.</small>
 
   <div class="row">
     <span class="btn" id="btnPlay">Play</span>
@@ -89,12 +118,15 @@
 
   <div class="row"><small>Move: WASD/Arrows • Throw: Space • Pause: Esc</small></div>
 </div>
+<div id="scrim"></div>
 
 <canvas id="game" width="1280" height="720"></canvas>
 
 <div id="title" class="title" style="display:flex">
   <div class="card">
-    <div id="titleHeading" style="font-size:28px;font-weight:800;margin-bottom:6px">Karen Crashout — Click anywhere to start music • Press Play</div>
+    <div id="titleHeading" style="font-size:28px;font-weight:800;margin-bottom:6px">
+      Karen Crashout — Click once to enable audio • then press Play
+    </div>
     <div class="pill">WASD move</div><div class="pill">Space throw</div><div class="pill">Esc pause</div>
     <div style="margin-top:14px">
       <span class="btn" id="titlePlay">Play</span>
@@ -362,12 +394,12 @@ function drawBackground(){if(bgImg){const cw=canvas.width,ch=canvas.height,iw=bg
 /* Damage */
 function damagePlayer(a){if(player.shield>0||player.inv>0) return;const m=parseFloat(ui.dmg?.value||1);player.hp=Math.max(0,player.hp-a*m);}
 
-/* Loop: **guarded by player** to avoid null .x reads */
+/* Loop (guarded by player to avoid null reads) */
 let spawnBase=1.3,last=performance.now();
 async function loop(now=performance.now()){
   delta=Math.min(0.033,(now-last)/1000);last=now;
-
   const hasPlayer=!!player;
+
   if(!paused && hasPlayer){
     spawnTimer-=delta;const slider=parseFloat(ui.spawn?.value||1);const nextEvery=spawnBase/slider;if(spawnTimer<=0&&needBoss){spawnTimer=nextEvery;spawnEnemy();}
     crowdChatterTimer-=delta;if(crowdChatterTimer<=0&&enemies.length){crowdChatterTimer=rand(3.5,6.0);const e=pick(enemies);if(e&&!e.dead) say(e,pick(LINES[level]||LINES.coffee));}
@@ -383,13 +415,16 @@ async function loop(now=performance.now()){
     }
     for(const p of enemyShots){if(hitCircle(p.x,p.y,p.r,player.x,player.y-18,player.r)){damagePlayer(p.dmg);p.life=0;sfxHit();}}
     for(const e of enemies){if(!e.dead&&hitCircle(player.x,player.y-10,player.r,e.x,e.y-10,e.colR)){damagePlayer(e.bodyDmg);e.dead=true;sfxHit();}}
-    enemies=enemies.filter(e=>!e.dead&&e.x>-80&&e.hp>0); playerShots=playerShots.filter(p=>p.life>0&&p.x<canvas.width+40); enemyShots=enemyShots.filter(p=>p.life>0&&p.x>-60&&p.x<canvas.width+60&&p.y>60&&p.y<canvas.height-10);
+
+    enemies=enemies.filter(e=>!e.dead&&e.x>-80&&e.hp>0);
+    playerShots=playerShots.filter(p=>p.life>0&&p.x<canvas.width+40);
+    enemyShots=enemyShots.filter(p=>p.life>0&&p.x>-60&&p.x<canvas.width+60&&p.y>60&&p.y<canvas.height-10);
+
     if(needBoss&&kills>=16){needBoss=false;boss=await createBoss();}
     if(player.hp<=0){ if(player.lives>0){player.lives-=1;player.hp=player.maxHp;player.st=player.maxSt;player.inv=2.5;say(player,"Not today!",1.8);} else {paused=true;saveBest();TTS.stop();BGM.switchTo("splash");titleHeading.textContent="Defeat — Press Play";titleOverlay.style.display="flex";}}
     if(!needBoss&&boss&&boss.hp<=0){paused=true;score+=300;saveBest();TTS.stop();BGM.switchTo("splash");say(boss,pick(LINES.onDefeat));titleHeading.textContent="Victory — Choose another level";titleOverlay.style.display="flex";}
   }
 
-  // Always draw (so background shows even before boot)
   drawBackground(); drawProps(); drawPowerups();
   hasPlayer && player.draw(); enemies.forEach(e=>e.draw());
   playerShots.forEach(p=>drawEmoji(p.ch,p.x,p.y,28)); enemyShots.forEach(p=>p.draw());
@@ -420,19 +455,31 @@ function hideTitle(){ titleOverlay.style.display="none"; initAudio(); }
 /* Start loop (splash still visible) */
 requestAnimationFrame(loop);
 
-/* Controls — **boot first, then unpause** to avoid race */
-document.getElementById("titlePlay").onclick = async ()=>{ hideTitle(); await boot(level); paused=false; if(musicOn) BGM.switchTo(level); };
-document.getElementById("btnPlay").onclick  = async ()=>{ hideTitle(); if(!player) await boot(level); paused=false; if(musicOn) BGM.switchTo(level); };
-document.getElementById("btnQuick").onclick = async ()=>{ hideTitle(); await boot("coffee"); paused=false; if(musicOn) BGM.switchTo("coffee"); };
+/* Controls — boot first, then unpause (prevents null targets) */
+document.getElementById("titlePlay").onclick = async ()=>{ closeMenu(); hideTitle(); await boot(level); paused=false; if(musicOn) BGM.switchTo(level); };
+document.getElementById("btnPlay").onclick  = async ()=>{ closeMenu(); hideTitle(); if(!player) await boot(level); paused=false; if(musicOn) BGM.switchTo(level); };
+document.getElementById("btnQuick").onclick = async ()=>{ closeMenu(); hideTitle(); await boot("coffee"); paused=false; if(musicOn) BGM.switchTo("coffee"); };
 document.getElementById("btnPause").onclick = ()=>{ paused=true; TTS.stop(); };
 document.getElementById("btnResetBoss").onclick = ()=>{ Object.keys(POOLS).forEach(k=>localStorage.removeItem(bossKey(k))); if(ui.boss) ui.boss.textContent="—"; };
 
-document.querySelectorAll(".lvl").forEach(b=> b.addEventListener("click", async ()=>{ hideTitle(); await boot(b.dataset.lvl); paused=false; if(musicOn) BGM.switchTo(level); }));
+document.querySelectorAll(".lvl").forEach(b=> b.addEventListener("click", async ()=>{ closeMenu(); hideTitle(); await boot(b.dataset.lvl); paused=false; if(musicOn) BGM.switchTo(level); }));
 document.querySelectorAll(".skin").forEach(chip=> chip.addEventListener("click", async ()=>{ document.querySelectorAll(".skin").forEach(c=>c.classList.remove("sel")); chip.classList.add("sel"); skin=chip.dataset.skin; localStorage.setItem("playerSkin",skin); if(player){ await boot(level); paused=false; if(musicOn) BGM.switchTo(level); } }));
 
 document.getElementById("toggleVoices").onclick = ()=>{ voicesOn=!voicesOn; if(!voicesOn) TTS.stop(); if(ui.vState) ui.vState.textContent=voicesOn?"On":"Off"; };
 document.getElementById("toggleSfx").onclick    = ()=>{ sfxOn=!sfxOn; if(ui.sState) ui.sState.textContent=sfxOn?"On":"Off"; };
 document.getElementById("toggleMusic").onclick  = ()=>{ musicOn=!musicOn; if(ui.mState) ui.mState.textContent=musicOn?"On":"Off"; if(!musicOn) BGM.stop(); else { initAudio(); if(titleOverlay.style.display!=="none") BGM.switchTo("splash"); else BGM.switchTo(level); } };
+
+/* ================= Hamburger toggle ================= */
+const hamb = document.getElementById('hamb');
+const menu = document.getElementById('ui');
+const scrim = document.getElementById('scrim');
+function openMenu(){ menu.classList.add('open'); scrim.classList.add('show'); }
+function closeMenu(){ menu.classList.remove('open'); scrim.classList.remove('show'); }
+function toggleMenu(){ menu.classList.contains('open') ? closeMenu() : openMenu(); }
+hamb.addEventListener('click', toggleMenu);
+scrim.addEventListener('click', closeMenu);
+document.addEventListener('keydown', e=>{ if(e.code==='Escape' && menu.classList.contains('open')) closeMenu(); });
+
 </script>
 </body>
 </html>
