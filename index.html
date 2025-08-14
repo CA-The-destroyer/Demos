@@ -613,26 +613,34 @@ function spawnEnemyEmoji(x,y,ch,speed,tx,ty,damage){
 /* Props */
 function buildProps(){
   props.length=0;
-  if(level==="grocery"){ for(let y=PLAY_TOP+60;y<=540;y+=120) props.push({type:"cone",x:canvas.width*0.55,y,r:18}); }
-  if(level==="parking"){ for(let y=PLAY_TOP+50;y<=520;y+=150) props.push({type:"cone",x:canvas.width*0.60,y,r:18}); for(let y=PLAY_TOP+20;y<=560;y+=100) props.push({type:"mailbox",x:canvas.width*0.40,y,r:20}); }
-  if(level==="neighborhood"){ for(let y=PLAY_TOP+10;y<=560)y+=100, props.push({type:"mailbox",x:canvas.width*0.55,y,r:20}); }
-  if(level==="office"){ props.push({type:"cooler",x:canvas.width*0.35,y:canvas.height*0.65,r:22,cool:0}); props.push({type:"mailbox",x:canvas.width*0.50,y:canvas.height*0.45,r:20}); }
-}
-function drawProps(){
-  for(const p of props){
-    if(p.type==="cone"){ ctx.save(); ctx.translate(p.x,p.y); ctx.fillStyle="#ff7a00"; ctx.beginPath(); ctx.moveTo(-10,12); ctx.lineTo(10,12); ctx.lineTo(0,-14); ctx.closePath(); ctx.fill(); ctx.fillStyle="#fff"; ctx.fillRect(-8,2,16,3); ctx.restore(); }
-    if(p.type==="mailbox"){ ctx.save(); ctx.translate(p.x,p.y); ctx.fillStyle="#2b5dab"; ctx.fillRect(-14,-12,28,24); ctx.fillStyle="#173055"; ctx.fillRect(-14,0,28,3); ctx.restore(); }
-    if(p.type==="cooler"){ ctx.save(); ctx.translate(p.x,p.y); ctx.fillStyle="#8dd1ff"; ctx.fillRect(-14,-18,28,36); ctx.fillStyle="#cdefff"; ctx.fillRect(-12,-16,24,20); ctx.restore(); }
+
+  if(level==="grocery"){
+    for(let y=PLAY_TOP+60; y<=540; y+=120){
+      props.push({type:"cone", x:canvas.width*0.55, y, r:18});
+    }
+  }
+
+  if(level==="parking"){
+    for(let y=PLAY_TOP+50; y<=520; y+=150){
+      props.push({type:"cone", x:canvas.width*0.60, y, r:18});
+    }
+    for(let y=PLAY_TOP+20; y<=560; y+=100){
+      props.push({type:"mailbox", x:canvas.width*0.40, y, r:20});
+    }
+  }
+
+  if(level==="neighborhood"){
+    for(let y=PLAY_TOP+10; y<=560; y+=100){
+      props.push({type:"mailbox", x:canvas.width*0.55, y, r:20});
+    }
+  }
+
+  if(level==="office"){
+    props.push({type:"cooler",  x:canvas.width*0.35, y:canvas.height*0.65, r:22, cool:0});
+    props.push({type:"mailbox", x:canvas.width*0.50, y:canvas.height*0.45, r:20});
   }
 }
-function handleProps(dt){
-  for(const e of enemies){ for(const p of props){ if(p.type==="cone" && hitCircle(e.x,e.y-10,e.colR||20, p.x,p.y, p.r)){ e.vy=(e.y<p.y?-1:1)*rand(120,180); e.y+=e.vy*dt; } } }
-  const allProj=[...playerShots,...enemyShots];
-  for(const p of props){
-    if(p.type==="mailbox"){ for(const pr of allProj){ if(hitCircle(pr.x,pr.y,12,p.x,p.y,p.r)){ pr.vx*=-1; pr.x+=pr.vx*0.02; } } }
-    else if(p.type==="cooler"){ p.cool-=dt; if(p.cool<=0 && hitCircle(player.x,player.y-10,player.r, p.x,p.y,p.r+8)){ player.hp=Math.min(player.maxHp,player.hp+10); player.st=Math.min(player.maxSt,player.st+40); p.cool=6.0; } }
-  }
-}
+
 
 /* Powerups */
 const POWERUP_TYPES=[{type:"shield",ch:"🛡️",dur:6},{type:"life",ch:"❤️"},{type:"stam",ch:"☕",amt:50},{type:"cheap",ch:"⚡",dur:10},{type:"tri",ch:"✨",dur:10}];
