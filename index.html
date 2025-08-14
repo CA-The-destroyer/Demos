@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Karen Crashout — DX+ (All bosses attack + Poo Critical)</title>
+<title>Karen Crashout — DX+ (robust audio, splash, universal boss attacks)</title>
 
 <!-- Preload splash music for instant start -->
 <link rel="preload" as="audio" href="Assets/splash_screen.mp3" type="audio/mpeg" crossorigin="anonymous">
@@ -39,7 +39,7 @@
 <!-- LEFT PANEL -->
 <div id="ui">
   <h1>Karen Crashout</h1>
-  <small>All bosses attack • Critical 💩 storm at 20% • Scene music • Per-scene scaling</small>
+  <small>Robust music • Splash plays reliably • All bosses attack • 💩 critical at 20%</small>
 
   <div class="row">
     <span class="btn" id="btnPlay">Play</span>
@@ -103,7 +103,7 @@
 <!-- TITLE OVERLAY -->
 <div id="title" class="title" style="display:flex">
   <div class="card">
-    <div id="titleHeading" style="font-size:28px;font-weight:800;margin-bottom:6px">Karen Crashout — Click to start music • Press Play</div>
+    <div id="titleHeading" style="font-size:28px;font-weight:800;margin-bottom:6px">Karen Crashout — Click anywhere to start music • Press Play</div>
     <div class="pill">WASD move</div><div class="pill">Space throw</div><div class="pill">Esc pause</div>
     <div style="margin-top:14px">
       <span class="btn" id="titlePlay">Play</span>
@@ -240,21 +240,80 @@ function refreshVoices(){
 }
 if("speechSynthesis" in window){ speechSynthesis.onvoiceschanged=refreshVoices; refreshVoices(); }
 
+/* -------- Robust BGM engine: cache + watchdog + safe switch ---------- */
 const BGM = {
   cur:null, curGain:null, curName:null,
-  async _load(url){ initAudio(); const res=await fetch(encodeURI("Assets/"+url)); const buf=await res.arrayBuffer(); return await ac.decodeAudioData(buf); },
-  async switchTo(name, fade=0.6){
-    if(!musicOn) return; initAudio(); const url=TRACKS[name]||TRACKS.coffee;
-    try{
-      const buf=await this._load(url); const src=ac.createBufferSource(); src.buffer=buf; src.loop=true;
-      const g=ac.createGain(); g.gain.value=0.0001; src.connect(g).connect(ac.destination); src.start();
-      if(this.cur && this.curGain){ const og=this.curGain; og.gain.cancelScheduledValues(ac.currentTime); og.gain.setTargetAtTime(0.0001,ac.currentTime,fade); setTimeout(()=>{try{this.cur.stop();}catch(e){}}, fade*1000*4); }
-      g.gain.cancelScheduledValues(ac.currentTime); g.gain.setTargetAtTime(0.4, ac.currentTime+0.02, fade);
-      this.cur=src; this.curGain=g; this.curName=name;
-    }catch(e){}
+  cache:new Map(),
+
+  async _load(url){
+    initAudio();
+    if (this.cache.has(url)) return this.cache.get(url);
+    const res = await fetch(encodeURI("Assets/"+url), { cache: "force-cache" });
+    const buf = await res.arrayBuffer();
+    const audio = await ac.decodeAudioData(buf);
+    this.cache.set(url, audio);
+    return audio;
   },
-  stop(){ try{ if(this.cur){ this.cur.stop(); this.cur.disconnect(); } }catch(e){} this.cur=null; this.curGain=null; this.curName=null; }
+
+  async switchTo(name, fade=0.8){
+    if (!musicOn) return;
+    initAudio();
+    if (!name) return;
+
+    // already playing requested track? just ensure audible
+    if (this.curName === name && this.cur) {
+      try { if (ac.state !== "running") await ac.resume(); } catch(e){}
+      if (this.curGain) this.curGain.gain.value = 0.4;
+      return;
+    }
+
+    const url = TRACKS[name] || TRACKS.coffee;
+    try{
+      const buf = await this._load(url);
+      const src = ac.createBufferSource(); src.buffer=buf; src.loop=true;
+      const g = ac.createGain(); g.gain.value=0.0001; src.connect(g).connect(ac.destination);
+      src.start();
+
+      // fade out old
+      if (this.cur && this.curGain){
+        const og=this.curGain;
+        try{
+          og.gain.cancelScheduledValues(ac.currentTime);
+          og.gain.setTargetAtTime(0.0001, ac.currentTime, fade);
+          setTimeout(()=>{ try{ this.cur.stop(); this.cur.disconnect(); }catch(e){} }, fade*1000*3);
+        }catch(e){}
+      }
+
+      // fade in new
+      g.gain.cancelScheduledValues(ac.currentTime);
+      g.gain.setTargetAtTime(0.4, ac.currentTime+0.02, fade);
+
+      this.cur = src; this.curGain = g; this.curName = name;
+    }catch(e){
+      // keep game running even if audio fails
+    }
+  },
+
+  ensure(){
+    if (!musicOn) return;
+    if (!ac) initAudio();
+    if (ac && ac.state !== "running") { ac.resume().catch(()=>{}); }
+    if (!this.cur && this.curName) { this.switchTo(this.curName); }
+  },
+
+  stop(){
+    try { if (this.cur){ this.cur.stop(); this.cur.disconnect(); } } catch(e){}
+    this.cur=null; this.curGain=null; this.curName=null;
+  }
 };
+
+// Music watchdog: recover from suspended AudioContext (tab switch / mobile)
+setInterval(()=>BGM.ensure(), 3500);
+
+// Arm splash music on the very first user gesture anywhere (capture + once)
+function armSplashOnce(){ initAudio(); if (musicOn) BGM.switchTo("splash"); }
+window.addEventListener("pointerdown", armSplashOnce, { once:true, capture:true });
+
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ try{ speechSynthesis.cancel(); }catch(e){} }});
 const TTS = {
   busy:false, bossUntil:0, utter:null,
@@ -296,11 +355,13 @@ function nrm(vx,vy){ const L=len2(vx,vy); return [vx/L,vy/L]; }
 
 /* Magic border */
 let PLAY_TOP=110;
+const canvas=document.getElementById("game"); const ctx=canvas.getContext("2d");
 function playerBox(){ return { l:60, r:Math.floor(canvas.width*0.48), t:PLAY_TOP+20, b:canvas.height-40 }; }
 function bossBox(){ return { l:Math.floor(canvas.width*0.55), r:canvas.width-60, t:PLAY_TOP+20, b:canvas.height-40 }; }
 
-const canvas=document.getElementById("game"); const ctx=canvas.getContext("2d");
-let level=localStorage.getItem("lastLevel")||"coffee"; let skin=localStorage.getItem("playerSkin")||"M1walk.png"; let paused=false;
+let level=localStorage.getItem("lastLevel")||"coffee";
+let skin =localStorage.getItem("playerSkin")||"M1walk.png";
+let paused = true; // start paused to allow splash to play
 
 let player=null,boss=null; let enemies=[],playerShots=[],enemyShots=[],props=[],powerups=[];
 let kills=0,needBoss=true,spawnTimer=0,powerTimer=0,score=0,crowdChatterTimer=3.5;
@@ -445,10 +506,11 @@ async function createBoss(){
       this.x  += this.vx*dt; this.y += this.vy*dt;
 
       // keep on-screen (respect magic border)
-      if(this.y<bb.t){ this.y=bb.t; this.vy=Math.abs(this.vy)*0.85; }
-      if(this.y>bb.b){ this.y=bb.b; this.vy=-Math.abs(this.vy)*0.85; }
-      if(this.x<bb.l){ this.x=bb.l; this.vx=Math.abs(this.vx)*0.85; }
-      if(this.x>bb.r){ this.x=bb.r; this.vx=-Math.abs(this.vx)*0.85; }
+      const bb2=bossBox();
+      if(this.y<bb2.t){ this.y=bb2.t; this.vy=Math.abs(this.vy)*0.85; }
+      if(this.y>bb2.b){ this.y=bb2.b; this.vy=-Math.abs(this.vy)*0.85; }
+      if(this.x<bb2.l){ this.x=bb2.l; this.vx=Math.abs(this.vx)*0.85; }
+      if(this.x>bb2.r){ this.x=bb2.r; this.vx=-Math.abs(this.vx)*0.85; }
 
       // anim
       if(Math.abs(this.vx)>Math.abs(this.vy)) this.anim.dir=(this.vx>=0)?"right":"left";
@@ -553,7 +615,7 @@ function buildProps(){
   props.length=0;
   if(level==="grocery"){ for(let y=PLAY_TOP+60;y<=540;y+=120) props.push({type:"cone",x:canvas.width*0.55,y,r:18}); }
   if(level==="parking"){ for(let y=PLAY_TOP+50;y<=520;y+=150) props.push({type:"cone",x:canvas.width*0.60,y,r:18}); for(let y=PLAY_TOP+20;y<=560;y+=100) props.push({type:"mailbox",x:canvas.width*0.40,y,r:20}); }
-  if(level==="neighborhood"){ for(let y=PLAY_TOP+10;y<=560;y+=100) props.push({type:"mailbox",x:canvas.width*0.55,y,r:20}); }
+  if(level==="neighborhood"){ for(let y=PLAY_TOP+10;y<=560)y+=100, props.push({type:"mailbox",x:canvas.width*0.55,y,r:20}); }
   if(level==="office"){ props.push({type:"cooler",x:canvas.width*0.35,y:canvas.height*0.65,r:22,cool:0}); props.push({type:"mailbox",x:canvas.width*0.50,y:canvas.height*0.45,r:20}); }
 }
 function drawProps(){
@@ -662,22 +724,37 @@ async function boot(lvl){
   document.querySelectorAll(".skin").forEach(c=>c.classList.toggle("sel",c.dataset.skin===lvlSkin));
   boss=null; buildProps();
   ui.best.textContent=+localStorage.getItem("best:"+level)||0; ui.bestLevel.textContent=level; ui.lives.textContent=player.lives;
-  if(musicOn) BGM.switchTo(level);
 }
-function hideTitle(){ titleOverlay.style.display="none"; initAudio(); }
-let splashArmed=true;
-titleOverlay.addEventListener("pointerdown", ()=>{ if(splashArmed && musicOn){ initAudio(); BGM.switchTo("splash"); splashArmed=false; } }, {once:true});
 
-document.getElementById("titlePlay").onclick = async ()=>{ hideTitle(); TTS.stop(); paused=false; await boot(level); };
-document.getElementById("btnPlay").onclick  = async ()=>{ hideTitle(); TTS.stop(); paused=false; if(!player) await boot(level); else if(musicOn) BGM.switchTo(level); };
+function hideTitle(){ titleOverlay.style.display="none"; initAudio(); }
+
+// Keep loop running for splash + UI, but do not boot a level yet
+requestAnimationFrame(loop);
+
+// Start splash music on first click handled by armSplashOnce()
+// Boot the level only when pressing Play:
+document.getElementById("titlePlay").onclick = async ()=>{
+  hideTitle(); TTS.stop(); paused = false;
+  await boot(level);
+  if (musicOn) BGM.switchTo(level);
+};
+document.getElementById("btnPlay").onclick  = async ()=>{
+  hideTitle(); TTS.stop(); paused = false;
+  if(!player) await boot(level); else if(musicOn) BGM.switchTo(level);
+};
 document.getElementById("btnPause").onclick = ()=>{ paused=true; TTS.stop(); };
 document.getElementById("btnResetBoss").onclick = ()=>{ Object.keys(POOLS).forEach(k=>localStorage.removeItem(bossKey(k))); ui.boss.textContent="—"; };
 
-document.querySelectorAll(".lvl").forEach(b=> b.addEventListener("click", async ()=>{ hideTitle(); TTS.stop(); paused=false; await boot(b.dataset.lvl); }));
+document.querySelectorAll(".lvl").forEach(b=> b.addEventListener("click", async ()=>{
+  hideTitle(); TTS.stop(); paused=false;
+  await boot(b.dataset.lvl);
+  if (musicOn) BGM.switchTo(level);
+}));
 document.querySelectorAll(".skin").forEach(chip=>{
   chip.addEventListener("click", async ()=>{
     document.querySelectorAll(".skin").forEach(c=>c.classList.remove("sel"));
-    chip.classList.add("sel"); skin=chip.dataset.skin; localStorage.setItem("playerSkin",skin); await boot(level);
+    chip.classList.add("sel"); skin=chip.dataset.skin; localStorage.setItem("playerSkin",skin);
+    if(player){ await boot(level); if(musicOn) BGM.switchTo(level); }
   });
 });
 document.getElementById("toggleVoices").onclick = ()=>{ voicesOn=!voicesOn; if(!voicesOn) TTS.stop(); $("#vState").textContent=voicesOn?"On":"Off"; };
@@ -686,8 +763,6 @@ document.getElementById("toggleMusic").onclick  = ()=>{
   musicOn=!musicOn; $("#mState").textContent=musicOn?"On":"Off";
   if(!musicOn) BGM.stop(); else { initAudio(); if(titleOverlay.style.display!=="none") BGM.switchTo("splash"); else BGM.switchTo(level); }
 };
-
-(async function start(){ await boot(level); requestAnimationFrame(loop); })();
 </script>
 </body>
 </html>
