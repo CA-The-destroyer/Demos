@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Karen Crashout — DX+ (robust audio, splash, universal boss attacks)</title>
+<title>Karen Crashout — DX (fixed launch + robust audio)</title>
 
-<!-- Preload splash music for instant start -->
+<!-- Preload splash for instant start after first click -->
 <link rel="preload" as="audio" href="Assets/splash_screen.mp3" type="audio/mpeg" crossorigin="anonymous">
 
 <style>
@@ -39,7 +39,7 @@
 <!-- LEFT PANEL -->
 <div id="ui">
   <h1>Karen Crashout</h1>
-  <small>Robust music • Splash plays reliably • All bosses attack • 💩 critical at 20%</small>
+  <small>Launch fix • Splash music on first click • Cached/auto-resume BGM • All bosses attack • 💩 at 20%</small>
 
   <div class="row">
     <span class="btn" id="btnPlay">Play</span>
@@ -125,7 +125,7 @@ const POOLS = {
   office:       ["K2walk.png","K3walk.png"] // blonde-only pool
 };
 
-/* Backgrounds + magic border (block top strip) */
+/* Backgrounds + magic border */
 const LEVEL_BG = {
   coffee:       "Assets/Coffee_shop-bkgrnd.png",
   grocery:      "Assets/Grocery-bkgnd.png",
@@ -135,13 +135,13 @@ const LEVEL_BG = {
 };
 const LEVEL_BAND_Y = { coffee:210, grocery:220, parking:170, neighborhood:240, office:230 };
 
-/* Per-scene visual scale so sprites fit backgrounds */
+/* Scale so sprites match backgrounds */
 const SCALE = { coffee:1.75, grocery:1.75, parking:1.85, neighborhood:1.85, office:1.95 };
-const BOSS_MULT = 3.0;   // boss size relative to scene scale
+const BOSS_MULT = 3.0;   // boss size multiplier
 
-/* Scene music */
+/* Music */
 const TRACKS = {
-  splash:       "splash_screen.mp3",             // ← New splash track
+  splash:       "splash_screen.mp3",
   coffee:       "Karen_Glitchy_Groove.mp3",
   grocery:      "Chaos in Aisle Three.mp3",
   parking:      "Parking_Wars.mp3",
@@ -149,7 +149,7 @@ const TRACKS = {
   office:       "Queen_of_the_Complaint Line.mp3"
 };
 
-/* Player projectile spec by scene */
+/* Player projectiles by scene */
 const PLAYER_EMOJI = {
   coffee:       {ch:"☕", stamina:12, speed:560, damage:16},
   grocery:      {ch:"🛒", stamina:22, speed:480, damage:26},
@@ -159,15 +159,15 @@ const PLAYER_EMOJI = {
 };
 const MINION_EMOJI = ["💄","🍬","🥤"];
 
-/* Office boss special */
+/* Office boss specials */
 const OFFICE_BOSS_EMOJI = [
   {ch:"🐴", speed:520, damage:18},
   {ch:"🔥", speed:460, damage:22},
   {ch:"🚧", speed:380, damage:16}
 ];
 
-/* UNIVERSAL BOSS ATTACK CONFIG */
-const POO_SPEC = { ch:"💩", speed:420, damage:14 }; // critical attack for all bosses
+/* UNIVERSAL BOSS ATTACKS + 💩 critical */
+const POO_SPEC = { ch:"💩", speed:420, damage:14 };
 const BOSS_BASE_ATTACKS = {
   coffee:       [{ ch:"☕", speed:520, damage:16 }],
   grocery:      [{ ch:"🛒", speed:460, damage:22 }],
@@ -260,7 +260,7 @@ const BGM = {
     initAudio();
     if (!name) return;
 
-    // already playing requested track? just ensure audible
+    // Already playing this track? ensure it's audible and bail
     if (this.curName === name && this.cur) {
       try { if (ac.state !== "running") await ac.resume(); } catch(e){}
       if (this.curGain) this.curGain.gain.value = 0.4;
@@ -307,10 +307,10 @@ const BGM = {
   }
 };
 
-// Music watchdog: recover from suspended AudioContext (tab switch / mobile)
+// watchdog to recover from suspended AudioContext
 setInterval(()=>BGM.ensure(), 3500);
 
-// Arm splash music on the very first user gesture anywhere (capture + once)
+// Arm splash music on very first user gesture anywhere (capture + once)
 function armSplashOnce(){ initAudio(); if (musicOn) BGM.switchTo("splash"); }
 window.addEventListener("pointerdown", armSplashOnce, { once:true, capture:true });
 
@@ -334,10 +334,20 @@ const sfxHit   = ()=>sfx(220,0.09,0.10,"sawtooth");
 const sfxPup   = ()=>sfx(980,0.12,0.12,"triangle");
 
 /* ============================ Sprites ================================== */
-function loadImage2(url){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; }); }
+function loadImage2(url){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=url; }); } // graceful: resolve null if missing
 const ROW_MAP = { up:0, left:1, down:2, right:3 };
 async function SpriteGrid(url){
-  const img=await loadImage2(url); const rows=4, fh=Math.floor(img.height/rows), fw=fh, cols=Math.floor(img.width/fw);
+  const img=await loadImage2(url);
+  if(!img){
+    // fallback simple rect sprite
+    const fw=48, fh=48, cols=8;
+    return {
+      img:null, fw, fh, cols,
+      rect(){ return {sx:0,sy:0,sw:fw,sh:fh}; },
+      draw(ctx,x,y,dir,frame,scale=1){ ctx.fillStyle="#cde"; const dw=fw*scale, dh=fh*scale; ctx.fillRect(Math.round(x-dw/2), Math.round(y-dh), Math.round(dw), Math.round(dh)); }
+    };
+  }
+  const rows=4, fh=Math.floor(img.height/rows), fw=fh, cols=Math.max(1, Math.floor(img.width/fw));
   return { img, fw, fh, cols,
     rect(dir,frame){ const r=(ROW_MAP[dir]??0), c=frame%cols; return {sx:c*fw, sy:r*fh, sw:fw, sh:fh}; },
     draw(ctx,x,y,dir,frame,scale=1){ const {sx,sy,sw,sh}=this.rect(dir,frame); const dw=sw*scale, dh=sh*scale; ctx.drawImage(this.img,sx,sy,sw,sh, Math.round(x-dw/2), Math.round(y-dh), Math.round(dw), Math.round(dh)); }
@@ -353,7 +363,7 @@ function clampRect(x,y,box){ return { x: Math.max(box.l, Math.min(box.r, x)), y:
 function len2(vx,vy){ return Math.hypot(vx,vy)||1; }
 function nrm(vx,vy){ const L=len2(vx,vy); return [vx/L,vy/L]; }
 
-/* Magic border */
+/* Magic border line */
 let PLAY_TOP=110;
 const canvas=document.getElementById("game"); const ctx=canvas.getContext("2d");
 function playerBox(){ return { l:60, r:Math.floor(canvas.width*0.48), t:PLAY_TOP+20, b:canvas.height-40 }; }
@@ -365,7 +375,7 @@ let paused = true; // start paused to allow splash to play
 
 let player=null,boss=null; let enemies=[],playerShots=[],enemyShots=[],props=[],powerups=[];
 let kills=0,needBoss=true,spawnTimer=0,powerTimer=0,score=0,crowdChatterTimer=3.5;
-let bgImg=null; async function loadBG(lvl){ bgImg=await loadImage2(LEVEL_BG[lvl]); }
+let bgImg=null; async function loadBG(lvl){ try{ bgImg=await loadImage2(LEVEL_BG[lvl]); }catch(e){ bgImg=null; } }
 const rand=(a,b)=>a+Math.random()*(b-a); const pick=arr=>arr[(Math.random()*arr.length)|0];
 function drawEmoji(ch,x,y,size){ ctx.save(); ctx.font=`bold ${size}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.shadowColor="rgba(0,0,0,.25)"; ctx.shadowBlur=4; ctx.fillText(ch,x,y); ctx.restore(); }
 function hitCircle(ax,ay,ar,bx,by,br){ const dx=ax-bx,dy=ay-by; return dx*dx+dy*dy <= (ar+br)*(ar+br); }
@@ -412,7 +422,7 @@ async function createPlayer(skinFile){
 }
 function bossKey(lvl){ return "bossSheet:"+lvl; }
 
-/* ============================ Boss (UNIVERSAL ATTACKS + 💩 Critical) === */
+/* ============================ Boss (universal attacks + 💩 critical) === */
 async function createBoss(){
   const pool = POOLS[level];
   let url = localStorage.getItem(bossKey(level));
@@ -445,7 +455,6 @@ async function createBoss(){
   }
 
   function pooStorm(){
-    // radial burst
     const n = 8 + (Math.random()*4|0);
     for(let i=0;i<n;i++){
       const a = Math.random()*Math.PI*2;
@@ -459,7 +468,6 @@ async function createBoss(){
         draw(){ drawEmoji(this.ch,this.x,this.y,28); }
       });
     }
-    // a couple aimed
     for(let k=0;k<2;k++) shootAtPlayer(POO_SPEC, 8);
   }
 
@@ -472,7 +480,7 @@ async function createBoss(){
     anim:a,
 
     update(dt){
-      // ---------- movement ----------
+      // movement
       patTimer -= dt; if (patTimer<=0) choosePattern();
       ang += dt*(0.8+Math.random()*0.7);
       let targetV = { vx:-60, vy:0 };
@@ -505,7 +513,7 @@ async function createBoss(){
       this.vy = lerp(this.vy, targetV.vy, 0.12);
       this.x  += this.vx*dt; this.y += this.vy*dt;
 
-      // keep on-screen (respect magic border)
+      // stay on-screen (respect magic border box)
       const bb2=bossBox();
       if(this.y<bb2.t){ this.y=bb2.t; this.vy=Math.abs(this.vy)*0.85; }
       if(this.y>bb2.b){ this.y=bb2.b; this.vy=-Math.abs(this.vy)*0.85; }
@@ -520,10 +528,10 @@ async function createBoss(){
       this.anim.speed = sp;
       this.anim.update(dt);
 
-      // ---------- ATTACKS ----------
+      // attacks
       const isCritical = this.hp <= this.maxHp*0.20;
 
-      // base scene shots (all bosses)
+      // base scene shots
       throwCD -= dt;
       if(throwCD<=0){
         throwCD = isCritical ? (0.45+Math.random()*0.35) : (0.65+Math.random()*0.5);
@@ -532,7 +540,7 @@ async function createBoss(){
           const spec = (level==="office")
             ? pick(OFFICE_BOSS_EMOJI)
             : (Math.random()<0.25 ? { ch:pick(MINION_EMOJI), speed:440, damage:10 }
-                                   : pick(attackSet));
+                                   : pick(BOSS_BASE_ATTACKS[level]||[{ch:"🧿",speed:440,damage:12}]));
           shootAtPlayer(spec);
         }
         if(Math.random()<0.35) say(this, pick(LINES[level]||LINES.coffee));
@@ -543,7 +551,7 @@ async function createBoss(){
         if(!criticalAnnounced){ criticalAnnounced=true; say(this, pick(LINES.bossLow), 2.2); }
         enrageCD -= dt;
         if(enrageCD<=0){
-          enrageCD = 0.22;   // faster = wilder
+          enrageCD = 0.22;
           pooStorm();
           if(Math.random()<0.5) say(this, pick(LINES.bossLow));
         }
@@ -610,7 +618,7 @@ function spawnEnemyEmoji(x,y,ch,speed,tx,ty,damage){
   });
 }
 
-/* Props */
+/* Props (FIXED buildProps) */
 function buildProps(){
   props.length=0;
 
@@ -640,7 +648,35 @@ function buildProps(){
     props.push({type:"mailbox", x:canvas.width*0.50, y:canvas.height*0.45, r:20});
   }
 }
-
+function drawProps(){
+  for(const p of props){
+    if(p.type==="cone"){ ctx.save(); ctx.translate(p.x,p.y); ctx.fillStyle="#ff7a00"; ctx.beginPath(); ctx.moveTo(-10,12); ctx.lineTo(10,12); ctx.lineTo(0,-14); ctx.closePath(); ctx.fill(); ctx.fillStyle="#fff"; ctx.fillRect(-8,2,16,3); ctx.restore(); }
+    if(p.type==="mailbox"){ ctx.save(); ctx.translate(p.x,p.y); ctx.fillStyle="#2b5dab"; ctx.fillRect(-14,-12,28,24); ctx.fillStyle="#173055"; ctx.fillRect(-14,0,28,3); ctx.restore(); }
+    if(p.type==="cooler"){ ctx.save(); ctx.translate(p.x,p.y); ctx.fillStyle="#8dd1ff"; ctx.fillRect(-14,-18,28,36); ctx.fillStyle="#cdefff"; ctx.fillRect(-12,-16,24,20); ctx.restore(); }
+  }
+}
+function handleProps(dt){
+  for(const e of enemies){
+    for(const p of props){
+      if(p.type==="cone" && hitCircle(e.x,e.y-10,e.colR||20, p.x,p.y, p.r)){
+        e.vy=(e.y<p.y?-1:1)*rand(120,180); e.y+=e.vy*dt;
+      }
+    }
+  }
+  const allProj=[...playerShots,...enemyShots];
+  for(const p of props){
+    if(p.type==="mailbox"){
+      for(const pr of allProj){ if(hitCircle(pr.x,pr.y,12,p.x,p.y,p.r)){ pr.vx*=-1; pr.x+=pr.vx*0.02; } }
+    } else if(p.type==="cooler"){
+      p.cool-=dt;
+      if(p.cool<=0 && hitCircle(player.x,player.y-10,player.r, p.x,p.y,p.r+8)){
+        player.hp=Math.min(player.maxHp,player.hp+10);
+        player.st=Math.min(player.maxSt,player.st+40);
+        p.cool=6.0;
+      }
+    }
+  }
+}
 
 /* Powerups */
 const POWERUP_TYPES=[{type:"shield",ch:"🛡️",dur:6},{type:"life",ch:"❤️"},{type:"stam",ch:"☕",amt:50},{type:"cheap",ch:"⚡",dur:10},{type:"tri",ch:"✨",dur:10}];
@@ -723,7 +759,7 @@ async function loop(now=performance.now()){
 
 /* Boot / UI */
 async function boot(lvl){
-  TTS.stop(); level=lvl; ui.level.textContent=lvl; localStorage.setItem("lastLevel",lvl);
+  TTS.stop(); level=lvl; (ui.level||{}).textContent=lvl; localStorage.setItem("lastLevel",lvl);
   PLAY_TOP=LEVEL_BAND_Y[lvl]??110;
   await loadBG(lvl);
   enemies.length=0; playerShots.length=0; enemyShots.length=0; props.length=0; powerups.length=0;
@@ -731,16 +767,15 @@ async function boot(lvl){
   const lvlSkin=effectiveSkinForLevel(level); player=await createPlayer(lvlSkin);
   document.querySelectorAll(".skin").forEach(c=>c.classList.toggle("sel",c.dataset.skin===lvlSkin));
   boss=null; buildProps();
-  ui.best.textContent=+localStorage.getItem("best:"+level)||0; ui.bestLevel.textContent=level; ui.lives.textContent=player.lives;
+  (ui.best||{}).textContent=+localStorage.getItem("best:"+level)||0; (ui.bestLevel||{}).textContent=level; (ui.lives||{}).textContent=player.lives;
 }
 
 function hideTitle(){ titleOverlay.style.display="none"; initAudio(); }
 
-// Keep loop running for splash + UI, but do not boot a level yet
+// Keep loop running for splash + UI; don’t boot level yet
 requestAnimationFrame(loop);
 
-// Start splash music on first click handled by armSplashOnce()
-// Boot the level only when pressing Play:
+// Start level on Play
 document.getElementById("titlePlay").onclick = async ()=>{
   hideTitle(); TTS.stop(); paused = false;
   await boot(level);
